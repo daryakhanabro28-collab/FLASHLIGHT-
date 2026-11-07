@@ -1,0 +1,6 @@
+{
+  "name": "UV Privacy",
+  "description": "Advanced secret vault and utility app by Darya Khan abro (team Mr Pro PrimeX) featuring a clock, flashlight, and encrypted file vault.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
