@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
 enum class AppScreen {
+    SPLASH,
     CLOCK,
     FLASHLIGHT,
     CALCULATOR,
@@ -24,7 +25,7 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
     private val database = VaultDatabase.getInstance(application)
     private val repository = VaultRepository(application, database.vaultDao())
 
-    private val _currentScreen = MutableStateFlow(AppScreen.CLOCK)
+    private val _currentScreen = MutableStateFlow(AppScreen.SPLASH)
     val currentScreen: StateFlow<AppScreen> = _currentScreen.asStateFlow()
 
     private val _isVaultUnlocked = MutableStateFlow(false)
@@ -44,6 +45,9 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _showAboutGuideDialog = MutableStateFlow(false)
     val showAboutGuideDialog: StateFlow<Boolean> = _showAboutGuideDialog.asStateFlow()
+
+    private val _pendingDeleteOriginalUris = MutableStateFlow<List<Uri>?>(null)
+    val pendingDeleteOriginalUris: StateFlow<List<Uri>?> = _pendingDeleteOriginalUris.asStateFlow()
 
     private val _authError = MutableStateFlow<String?>(null)
     val authError: StateFlow<String?> = _authError.asStateFlow()
@@ -260,10 +264,17 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
             val result = repository.importFiles(uris, _isDecoyVault.value, folderId)
             result.onSuccess { count ->
                 Toast.makeText(getApplication(), "Encrypted & secured $count items", Toast.LENGTH_SHORT).show()
+                if (settings.value.promptDeleteOriginals && uris.isNotEmpty()) {
+                    _pendingDeleteOriginalUris.value = uris
+                }
             }.onFailure {
                 Toast.makeText(getApplication(), "Import error: ${it.localizedMessage}", Toast.LENGTH_SHORT).show()
             }
         }
+    }
+
+    fun dismissDeleteOriginalsPrompt() {
+        _pendingDeleteOriginalUris.value = null
     }
 
     fun exportFile(item: VaultItem, destinationUri: Uri) {

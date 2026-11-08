@@ -213,8 +213,8 @@ fun AboutCreatorAndGuideDialog(
 
                         GuideStepCard(
                             icon = Icons.Default.FlashlightOn,
-                            title = "4. Flashlight Modes",
-                            description = "Control real device hardware torch, adjust strobe frequency (1-12 Hz), broadcast SOS Morse distress, or use screen torch with color palettes."
+                            title = "4. Flashlight Secret Vault Access",
+                            description = "Slide the Brightness Output slider to 77% and release, or long-press the Torch Power button for 1.5 seconds, or double-tap 'Brightness Output' to immediately reveal the Secret PIN screen!"
                         )
 
                         GuideStepCard(

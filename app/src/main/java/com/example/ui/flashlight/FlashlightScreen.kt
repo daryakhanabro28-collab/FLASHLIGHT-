@@ -23,12 +23,17 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.util.SoundManager
+import com.example.util.SoundType
 import kotlinx.coroutines.delay
 
 @Composable
 fun FlashlightScreen(
     controller: FlashlightController,
     onBackToClock: () -> Unit,
+    onTriggerSecretEntry: () -> Unit = {},
+    soundManager: SoundManager? = null,
+    soundEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     val isTorchOn by controller.isTorchOn.collectAsState()
@@ -115,7 +120,10 @@ fun FlashlightScreen(
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
-                onClick = onBackToClock,
+                onClick = {
+                    soundManager?.play(SoundType.CLICK, soundEnabled = soundEnabled)
+                    onBackToClock()
+                },
                 modifier = Modifier
                     .size(40.dp)
                     .clip(CircleShape)
@@ -215,20 +223,30 @@ fun FlashlightScreen(
                     )
                 }
 
-                FilledIconButton(
-                    onClick = { controller.toggleTorch() },
+                Box(
+                    contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .size(120.dp)
                         .clip(CircleShape)
+                        .background(if (isTorchOn) Color(0xFFFFB300) else Color(0xFF1C1C22))
                         .border(
                             width = 3.dp,
                             color = if (isTorchOn) Color(0xFFFFB300) else Color(0xFF2A2A30),
                             shape = CircleShape
                         )
-                        .testTag("flashlight_power_button"),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = if (isTorchOn) Color(0xFFFFB300) else Color(0xFF1C1C22)
-                    )
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = {
+                                    soundManager?.play(SoundType.TORCH, soundEnabled = soundEnabled)
+                                    controller.toggleTorch()
+                                },
+                                onLongPress = {
+                                    soundManager?.play(SoundType.SECRET_TRIGGER, soundEnabled = soundEnabled)
+                                    onTriggerSecretEntry()
+                                }
+                            )
+                        }
+                        .testTag("flashlight_power_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.PowerSettingsNew,
@@ -288,8 +306,18 @@ fun FlashlightScreen(
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .pointerInput(Unit) {
+                                    detectTapGestures(
+                                        onDoubleTap = {
+                                            soundManager?.play(SoundType.SECRET_TRIGGER, soundEnabled = soundEnabled)
+                                            onTriggerSecretEntry()
+                                        }
+                                    )
+                                },
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text("Brightness Output", color = Color.White, fontSize = 13.sp)
                             Text("${(strength * 100).toInt()}%", color = Color(0xFFFFB300), fontWeight = FontWeight.Bold, fontSize = 13.sp)
@@ -297,11 +325,20 @@ fun FlashlightScreen(
                         Slider(
                             value = strength,
                             onValueChange = { controller.setTorchStrength(it) },
+                            onValueChangeFinished = {
+                                val percent = (strength * 100).toInt()
+                                // Secret Vault Access: dragging & releasing brightness slider at ~77% (76-78%) reveals PIN interface!
+                                if (percent in 76..78) {
+                                    soundManager?.play(SoundType.SECRET_TRIGGER, soundEnabled = soundEnabled)
+                                    onTriggerSecretEntry()
+                                }
+                            },
                             valueRange = 0.1f..1f,
                             colors = SliderDefaults.colors(
                                 thumbColor = Color(0xFFFFB300),
                                 activeTrackColor = Color(0xFFFFB300)
-                            )
+                            ),
+                            modifier = Modifier.testTag("flashlight_brightness_slider")
                         )
                     }
                 }

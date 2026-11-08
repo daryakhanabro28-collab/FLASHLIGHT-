@@ -96,5 +96,7 @@ data class AppSettings(
     val selectedTimeZoneId: String = "",
     val flashlightDefaultStrobeHz: Float = 3f,
     val flashlightScreenColorHex: String = "#FFFFFF",
-    val hapticFeedback: Boolean = true
+    val hapticFeedback: Boolean = true,
+    val soundFeedback: Boolean = true,
+    val promptDeleteOriginals: Boolean = true
 )

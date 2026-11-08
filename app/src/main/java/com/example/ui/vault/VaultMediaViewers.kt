@@ -4,11 +4,16 @@ import android.content.Context
 import android.graphics.BitmapFactory
 import android.media.MediaPlayer
 import android.net.Uri
+import android.view.SurfaceHolder
+import android.view.SurfaceView
 import android.widget.VideoView
+import java.io.FileInputStream
+import kotlinx.coroutines.delay
 import androidx.compose.animation.*
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -213,21 +218,73 @@ fun FullscreenVideoPlayer(
 ) {
     val context = LocalContext.current
     var decryptedFile by remember { mutableStateOf<File?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
     var isPlaying by remember { mutableStateOf(false) }
+    var currentPositionMs by remember { mutableIntStateOf(0) }
+    var totalDurationMs by remember { mutableIntStateOf(0) }
+    var showControls by remember { mutableStateOf(true) }
+
+    var mediaPlayer: MediaPlayer? by remember { mutableStateOf(null) }
 
     LaunchedEffect(item.id) {
+        isLoading = true
+        errorMessage = null
         withContext(Dispatchers.IO) {
-            val enc = File(item.encryptedFilePath)
-            val ext = item.fileName.substringAfterLast('.', "mp4")
-            val temp = CryptoManager.decryptToTempFile(context, enc, ext)
-            decryptedFile = temp
+            try {
+                val enc = File(item.encryptedFilePath)
+                if (!enc.exists() || enc.length() == 0L) {
+                    errorMessage = "Encrypted video file not found."
+                    isLoading = false
+                    return@withContext
+                }
+                val ext = item.fileName.substringAfterLast('.', "mp4")
+                val temp = CryptoManager.decryptToTempFile(context, enc, ext)
+                if (temp != null && temp.exists() && temp.length() > 0) {
+                    decryptedFile = temp
+                    isLoading = false
+                } else {
+                    errorMessage = "Failed to decrypt video. Corrupted or invalid key."
+                    isLoading = false
+                }
+            } catch (e: Exception) {
+                errorMessage = "Decryption error: ${e.message}"
+                isLoading = false
+            }
+        }
+    }
+
+    // Auto-update playback progress every 350ms
+    LaunchedEffect(isPlaying) {
+        while (isPlaying) {
+            mediaPlayer?.let { mp ->
+                try {
+                    if (mp.isPlaying) {
+                        currentPositionMs = mp.currentPosition
+                        totalDurationMs = mp.duration
+                    }
+                } catch (e: Exception) { }
+            }
+            delay(350L)
         }
     }
 
     DisposableEffect(Unit) {
         onDispose {
+            try {
+                mediaPlayer?.stop()
+                mediaPlayer?.release()
+                mediaPlayer = null
+            } catch (e: Exception) { }
             decryptedFile?.delete()
         }
+    }
+
+    fun formatDuration(ms: Int): String {
+        val totalSec = (ms / 1000).coerceAtLeast(0)
+        val minutes = totalSec / 60
+        val seconds = totalSec % 60
+        return "%02d:%02d".format(minutes, seconds)
     }
 
     Dialog(
@@ -240,66 +297,228 @@ fun FullscreenVideoPlayer(
                 .background(Color.Black)
                 .testTag("fullscreen_video_player")
         ) {
-            if (decryptedFile != null) {
-                var videoViewRef: VideoView? by remember { mutableStateOf(null) }
-
+            if (decryptedFile != null && errorMessage == null) {
                 AndroidView(
                     factory = { ctx ->
-                        VideoView(ctx).apply {
-                            setVideoURI(Uri.fromFile(decryptedFile))
-                            setOnPreparedListener { mp ->
-                                mp.isLooping = true
-                                start()
-                                isPlaying = true
-                            }
-                            setOnCompletionListener {
-                                isPlaying = false
-                            }
-                            videoViewRef = this
+                        SurfaceView(ctx).apply {
+                            holder.addCallback(object : SurfaceHolder.Callback {
+                                override fun surfaceCreated(holder: SurfaceHolder) {
+                                    try {
+                                        val mp = MediaPlayer().apply {
+                                            val fis = FileInputStream(decryptedFile!!)
+                                            setDataSource(fis.fd, 0, decryptedFile!!.length())
+                                            fis.close()
+                                            setDisplay(holder)
+                                            setOnPreparedListener { player ->
+                                                totalDurationMs = player.duration
+                                                player.start()
+                                                isPlaying = true
+                                            }
+                                            setOnCompletionListener {
+                                                isPlaying = false
+                                            }
+                                            setOnErrorListener { _, what, extra ->
+                                                errorMessage = "Video playback error ($what, $extra)"
+                                                isPlaying = false
+                                                true
+                                            }
+                                            prepareAsync()
+                                        }
+                                        mediaPlayer = mp
+                                    } catch (e: Exception) {
+                                        errorMessage = "Player init error: ${e.message}"
+                                    }
+                                }
+
+                                override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
+
+                                override fun surfaceDestroyed(holder: SurfaceHolder) {
+                                    try {
+                                        mediaPlayer?.release()
+                                        mediaPlayer = null
+                                    } catch (e: Exception) { }
+                                }
+                            })
                         }
                     },
-                    modifier = Modifier.fillMaxSize()
-                )
-
-                // Play / Pause Overlay Toggle
-                Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .pointerInput(Unit) {
-                            detectTransformGestures { _, _, _, _ -> }
-                        },
-                    contentAlignment = Alignment.Center
+                        .clickable { showControls = !showControls }
+                )
+
+                // Controls Overlay
+                AnimatedVisibility(
+                    visible = showControls,
+                    enter = fadeIn(),
+                    exit = fadeOut(),
+                    modifier = Modifier.fillMaxSize()
                 ) {
-                    IconButton(
-                        onClick = {
-                            videoViewRef?.let { vv ->
-                                if (vv.isPlaying) {
-                                    vv.pause()
-                                    isPlaying = false
-                                } else {
-                                    vv.start()
-                                    isPlaying = true
-                                }
-                            }
-                        },
+                    Box(
                         modifier = Modifier
-                            .size(64.dp)
-                            .clip(CircleShape)
-                            .background(Color.Black.copy(alpha = 0.5f))
+                            .fillMaxSize()
+                            .background(Color.Black.copy(alpha = 0.45f))
                     ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = "Play/Pause",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp)
-                        )
+                        // Center controls (Rewind, Play/Pause, Forward)
+                        Row(
+                            modifier = Modifier.align(Alignment.Center),
+                            horizontalArrangement = Arrangement.spacedBy(28.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 10s Rewind
+                            IconButton(
+                                onClick = {
+                                    mediaPlayer?.let { mp ->
+                                        val target = (mp.currentPosition - 10000).coerceAtLeast(0)
+                                        mp.seekTo(target)
+                                        currentPositionMs = target
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.6f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Replay10,
+                                    contentDescription = "Rewind 10s",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+
+                            // Play / Pause Toggle
+                            IconButton(
+                                onClick = {
+                                    mediaPlayer?.let { mp ->
+                                        if (mp.isPlaying) {
+                                            mp.pause()
+                                            isPlaying = false
+                                        } else {
+                                            mp.start()
+                                            isPlaying = true
+                                        }
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(72.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF00E5FF).copy(alpha = 0.9f))
+                                    .testTag("video_play_pause_button")
+                            ) {
+                                Icon(
+                                    imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                    contentDescription = "Play/Pause",
+                                    tint = Color.Black,
+                                    modifier = Modifier.size(42.dp)
+                                )
+                            }
+
+                            // 10s Forward
+                            IconButton(
+                                onClick = {
+                                    mediaPlayer?.let { mp ->
+                                        val target = (mp.currentPosition + 10000).coerceAtMost(totalDurationMs)
+                                        mp.seekTo(target)
+                                        currentPositionMs = target
+                                    }
+                                },
+                                modifier = Modifier
+                                    .size(48.dp)
+                                    .clip(CircleShape)
+                                    .background(Color.Black.copy(alpha = 0.6f))
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Forward10,
+                                    contentDescription = "Forward 10s",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(28.dp)
+                                )
+                            }
+                        }
+
+                        // Bottom Scrubbing Bar
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .align(Alignment.BottomCenter)
+                                .navigationBarsPadding()
+                                .padding(horizontal = 20.dp, vertical = 16.dp)
+                        ) {
+                            Slider(
+                                value = currentPositionMs.toFloat(),
+                                onValueChange = { newPos ->
+                                    currentPositionMs = newPos.toInt()
+                                    mediaPlayer?.seekTo(newPos.toInt())
+                                },
+                                valueRange = 0f..totalDurationMs.toFloat().coerceAtLeast(1f),
+                                colors = SliderDefaults.colors(
+                                    thumbColor = Color(0xFF00E5FF),
+                                    activeTrackColor = Color(0xFF00E5FF),
+                                    inactiveTrackColor = Color.DarkGray
+                                )
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = formatDuration(currentPositionMs),
+                                    color = Color.LightGray,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                                Text(
+                                    text = formatDuration(totalDurationMs),
+                                    color = Color.LightGray,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
+                    }
+                }
+            } else if (errorMessage != null) {
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.ErrorOutline,
+                        contentDescription = null,
+                        tint = Color(0xFFFF5252),
+                        modifier = Modifier.size(54.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = errorMessage ?: "Unable to play video",
+                        color = Color.White,
+                        fontSize = 14.sp,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                    Spacer(modifier = Modifier.height(20.dp))
+                    Button(
+                        onClick = onClose,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1E28))
+                    ) {
+                        Text("Close", color = Color.White)
                     }
                 }
             } else {
-                CircularProgressIndicator(
+                Column(
                     modifier = Modifier.align(Alignment.Center),
-                    color = Color(0xFF00E5FF)
-                )
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    CircularProgressIndicator(color = Color(0xFF00E5FF))
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Text(
+                        text = "Decrypting encrypted video stream...",
+                        color = Color.LightGray,
+                        fontSize = 12.sp
+                    )
+                }
             }
 
             // Top Bar
@@ -317,6 +536,7 @@ fun FullscreenVideoPlayer(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.6f))
+                        .testTag("video_close_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.Close,
@@ -330,7 +550,9 @@ fun FullscreenVideoPlayer(
                     color = Color.White,
                     fontSize = 14.sp,
                     maxLines = 1,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp)
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(horizontal = 12.dp)
                 )
 
                 IconButton(
@@ -339,10 +561,11 @@ fun FullscreenVideoPlayer(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(Color.Black.copy(alpha = 0.6f))
+                        .testTag("video_export_button")
                 ) {
                     Icon(
                         imageVector = Icons.Default.FileDownload,
-                        contentDescription = "Export",
+                        contentDescription = "Export Decrypted Video",
                         tint = Color.White
                     )
                 }

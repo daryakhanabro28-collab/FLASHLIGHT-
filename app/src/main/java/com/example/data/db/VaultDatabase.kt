@@ -12,7 +12,7 @@ import com.example.data.model.VaultItem
 
 @Database(
     entities = [VaultItem::class, VaultFolder::class, IntruderLog::class, AppSettings::class],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 @TypeConverters(Converters::class)

@@ -1,10 +1,13 @@
 package com.example.ui.vault
 
+import android.app.Activity
 import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
+import com.example.util.OriginalFileDeleter
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -132,12 +135,24 @@ fun VaultMainScreen(
         }
     }
 
+    // Original files deletion after import
+    val context = LocalContext.current
+    var urisToPromptDelete by remember { mutableStateOf<List<Uri>?>(null) }
+    val intentSenderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            Toast.makeText(context, "Original media deleted from device", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     // Media Picker (Photos & Videos)
     val mediaPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickMultipleVisualMedia()
     ) { uris ->
         if (uris.isNotEmpty()) {
             onImportFiles(uris, selectedFolderId)
+            urisToPromptDelete = uris
         }
     }
 
@@ -147,6 +162,7 @@ fun VaultMainScreen(
     ) { uris ->
         if (uris.isNotEmpty()) {
             onImportFiles(uris, selectedFolderId)
+            urisToPromptDelete = uris
         }
     }
 
@@ -717,6 +733,70 @@ fun VaultMainScreen(
                 isMultiSelectMode = false
                 selectedItemIds = emptySet()
             }
+        )
+    }
+
+    if (urisToPromptDelete != null) {
+        val targets = urisToPromptDelete!!
+        AlertDialog(
+            onDismissRequest = { urisToPromptDelete = null },
+            icon = {
+                Icon(
+                    Icons.Default.DeleteSweep,
+                    contentDescription = null,
+                    tint = Color(0xFFFF5252),
+                    modifier = Modifier.size(32.dp)
+                )
+            },
+            title = {
+                Text(
+                    text = "Delete Original Files from Device?",
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White,
+                    fontSize = 17.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Your ${targets.size} file(s) have been encrypted and saved inside UV PRIVACY.\n\nTo prevent them from staying visible in your device Gallery or File Manager, would you like to delete the unencrypted original files from your device?",
+                    color = Color(0xFFD0D0D8),
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val currentTargets = targets
+                        urisToPromptDelete = null
+                        OriginalFileDeleter.deleteOriginals(
+                            context = context,
+                            uris = currentTargets,
+                            intentSenderLauncher = intentSenderLauncher
+                        ) { direct, pending ->
+                            if (pending == 0 && direct > 0) {
+                                Toast.makeText(context, "Deleted $direct original file(s) from device", Toast.LENGTH_SHORT).show()
+                            } else if (pending == 0 && direct == 0) {
+                                Toast.makeText(context, "Original files processed", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF5252)),
+                    modifier = Modifier.testTag("confirm_delete_originals_button")
+                ) {
+                    Text("Delete Originals", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { urisToPromptDelete = null },
+                    modifier = Modifier.testTag("keep_originals_button")
+                ) {
+                    Text("Keep Originals", color = Color.LightGray)
+                }
+            },
+            containerColor = Color(0xFF181822),
+            modifier = Modifier.testTag("delete_originals_dialog")
         )
     }
 }

@@ -23,6 +23,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import com.example.util.SoundManager
+import com.example.util.SoundType
 
 @Composable
 fun SecretPinDialog(
@@ -31,6 +33,8 @@ fun SecretPinDialog(
     onForgotPin: () -> Unit,
     onSetupNewPin: () -> Unit,
     errorMessage: String? = null,
+    soundManager: SoundManager? = null,
+    soundEnabled: Boolean = true,
     modifier: Modifier = Modifier
 ) {
     var pin by remember { mutableStateOf("") }
@@ -163,6 +167,7 @@ fun SecretPinDialog(
                                         }
                                     )
                                     .clickable {
+                                        soundManager?.play(SoundType.CLICK, soundEnabled = soundEnabled)
                                         when (key) {
                                             "DEL" -> {
                                                 if (pin.isNotEmpty()) pin = pin.dropLast(1)

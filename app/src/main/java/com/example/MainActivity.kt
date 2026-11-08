@@ -21,19 +21,24 @@ import com.example.ui.calculator.CalculatorScreen
 import com.example.ui.clock.ClockScreen
 import com.example.ui.flashlight.FlashlightController
 import com.example.ui.flashlight.FlashlightScreen
+import com.example.ui.splash.SplashScreen
 import com.example.ui.theme.UVPrivacyTheme
 import com.example.ui.vault.AboutCreatorAndGuideDialog
 import com.example.ui.vault.VaultMainScreen
 import com.example.ui.viewmodel.AppScreen
 import com.example.ui.viewmodel.VaultViewModel
+import com.example.util.SoundManager
+import com.example.util.SoundType
 
 class MainActivity : ComponentActivity() {
     private val viewModel: VaultViewModel by viewModels()
     private lateinit var flashlightController: FlashlightController
+    private lateinit var soundManager: SoundManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        soundManager = SoundManager(applicationContext)
         flashlightController = FlashlightController(applicationContext)
 
         // Lock vault automatically if app goes to background
@@ -66,6 +71,20 @@ class MainActivity : ComponentActivity() {
             val batteryLevel by flashlightController.batteryLevel.collectAsState()
             val isCharging by flashlightController.isCharging.collectAsState()
 
+            // Sound feedback for vault unlock
+            LaunchedEffect(isVaultUnlocked) {
+                if (isVaultUnlocked) {
+                    soundManager.play(SoundType.UNLOCK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                }
+            }
+
+            // Sound feedback for auth errors
+            LaunchedEffect(authError) {
+                if (!authError.isNullOrBlank()) {
+                    soundManager.play(SoundType.ERROR, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                }
+            }
+
             // Keep screen on handler
             LaunchedEffect(settings.keepScreenOn) {
                 if (settings.keepScreenOn) {
@@ -82,42 +101,77 @@ class MainActivity : ComponentActivity() {
                         label = "ScreenTransition"
                     ) { targetScreen ->
                         when (targetScreen) {
+                            AppScreen.SPLASH -> {
+                                SplashScreen(
+                                    onSplashFinished = {
+                                        viewModel.navigateTo(AppScreen.CLOCK)
+                                    },
+                                    soundManager = soundManager,
+                                    soundEnabled = settings.soundFeedback
+                                )
+                            }
+
                             AppScreen.CLOCK -> {
                                 ClockScreen(
                                     settings = settings,
                                     batteryLevel = batteryLevel,
                                     isCharging = isCharging,
-                                    onOpenFlashlight = { viewModel.navigateTo(AppScreen.FLASHLIGHT) },
-                                    onOpenCalculator = { viewModel.navigateTo(AppScreen.CALCULATOR) },
-                                    onTriggerSecretEntry = { viewModel.showPinPrompt() },
-                                    onOpenAboutGuide = { viewModel.showAboutGuide() },
+                                    onOpenFlashlight = {
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.navigateTo(AppScreen.FLASHLIGHT)
+                                    },
+                                    onOpenCalculator = {
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.navigateTo(AppScreen.CALCULATOR)
+                                    },
+                                    onTriggerSecretEntry = {
+                                        soundManager.play(SoundType.SECRET_TRIGGER, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.showPinPrompt()
+                                    },
+                                    onOpenAboutGuide = {
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.showAboutGuide()
+                                    },
                                     onUpdateSettings = { viewModel.updateSettings(it) }
                                 )
                             }
 
                             AppScreen.FLASHLIGHT -> {
                                 BackHandler {
+                                    soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
                                     flashlightController.turnOff()
                                     viewModel.navigateTo(AppScreen.CLOCK)
                                 }
                                 FlashlightScreen(
                                     controller = flashlightController,
                                     onBackToClock = {
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
                                         flashlightController.turnOff()
                                         viewModel.navigateTo(AppScreen.CLOCK)
-                                    }
+                                    },
+                                    onTriggerSecretEntry = {
+                                        flashlightController.turnOff()
+                                        viewModel.showPinPrompt()
+                                    },
+                                    soundManager = soundManager,
+                                    soundEnabled = settings.soundFeedback
                                 )
                             }
 
                             AppScreen.CALCULATOR -> {
                                 BackHandler {
+                                    soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
                                     viewModel.navigateTo(AppScreen.CLOCK)
                                 }
                                 CalculatorScreen(
                                     onEvaluateSecret = { candidate ->
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
                                         viewModel.evaluateCalculatorSecret(candidate)
                                     },
-                                    onBackToClock = { viewModel.navigateTo(AppScreen.CLOCK) }
+                                    onBackToClock = {
+                                        soundManager.play(SoundType.CLICK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.navigateTo(AppScreen.CLOCK)
+                                    }
                                 )
                             }
 
@@ -132,7 +186,10 @@ class MainActivity : ComponentActivity() {
                                     intruderLogs = intruderLogs,
                                     recycleBinItems = recycleBinItems,
                                     settings = settings,
-                                    onLockVault = { viewModel.lockVault() },
+                                    onLockVault = {
+                                        soundManager.play(SoundType.LOCK, soundEnabled = settings.soundFeedback, hapticEnabled = settings.hapticFeedback)
+                                        viewModel.lockVault()
+                                    },
                                     onImportFiles = { uris, folderId -> viewModel.importFiles(uris, folderId) },
                                     onExportFile = { item, uri -> viewModel.exportFile(item, uri) },
                                     onDeleteItems = { ids -> viewModel.deleteItems(ids) },
@@ -160,7 +217,9 @@ class MainActivity : ComponentActivity() {
                             onSubmitPin = { pin -> viewModel.verifyAndUnlock(pin) },
                             onForgotPin = { viewModel.showRecoveryPrompt() },
                             onSetupNewPin = { viewModel.showCreatePinPrompt() },
-                            errorMessage = authError
+                            errorMessage = authError,
+                            soundManager = soundManager,
+                            soundEnabled = settings.soundFeedback
                         )
                     }
 
@@ -196,6 +255,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
+        soundManager.release()
         flashlightController.destroy()
     }
 }
