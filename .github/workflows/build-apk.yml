@@ -1,4 +1,4 @@
-name: Build & Download Debug APK
+name: Build & Release Debug APK
 
 on:
   push:
@@ -7,9 +7,12 @@ on:
     branches: [ main, master ]
   workflow_dispatch: # Allows manual trigger from GitHub Actions UI anytime
 
+permissions:
+  contents: write
+
 jobs:
-  build:
-    name: Build Android Debug APK
+  build-and-release:
+    name: Build & Release Android Debug APK
     runs-on: ubuntu-latest
 
     steps:
@@ -45,13 +48,42 @@ jobs:
       - name: Build Debug APK with Gradle
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Verify APK Generation
+      - name: Verify & Prepare Release Assets
         run: |
-          ls -la app/build/outputs/apk/debug/
+          mkdir -p release-assets
+          cp app/build/outputs/apk/debug/app-debug.apk release-assets/UV-Privacy-v1.0-debug.apk
+          ls -lh release-assets/
 
-      - name: Upload Debug APK Artifact
+      - name: Upload Debug APK Artifact (Actions Tab)
         uses: actions/upload-artifact@v4
         with:
           name: UV-Privacy-Debug-APK
-          path: app/build/outputs/apk/debug/*.apk
+          path: release-assets/UV-Privacy-v1.0-debug.apk
           retention-days: 30
+
+      - name: Publish to GitHub Releases (Releases Section)
+        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-debug
+          name: "UV PRIVACY v1.0 (Debug APK)"
+          body: |
+            ## 🛡️ UV PRIVACY — Advanced Stealth Vault & Utility Suite
+            **Created by:** Darya Khan abro (team Mr Pro PrimeX)
+
+            ### 📲 Direct APK Download (No Unzipping Needed):
+            Click on **`UV-Privacy-v1.0-debug.apk`** below in the **Assets** section to download the standalone APK directly to your Android device.
+
+            ### ✨ Key Features:
+            - **Stealth Cloaking:** Disguised as a functional Clock and Flashlight utility.
+            - **Encrypted Media Vault:** Authenticated AES-256-GCM hardware-accelerated encryption.
+            - **Native Video Player:** Streaming file-descriptor playback with 10s skip, scrubber, and time elapsed counter.
+            - **Post-Import Gallery Cleaner:** Safely prompts to delete unencrypted original files from Gallery / Device storage.
+            - **Flashlight Secret Entry:** Drag & release brightness slider at 77% or long-press power button to trigger secret vault PIN.
+            - **Display Sounds & Haptics:** Audio tone and vibration feedback for keypad, flashlight, lock/unlock, and error states.
+            - **Animated Splash Screen:** Custom logo and creator attribution branding on launch.
+          draft: false
+          prerelease: false
+          files: release-assets/UV-Privacy-v1.0-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
