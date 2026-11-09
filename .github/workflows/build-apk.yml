@@ -2,22 +2,23 @@ name: Build & Release Debug APK
 
 on:
   push:
-    branches: [ main, master ]
-  pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: # Allows manual trigger from GitHub Actions UI anytime
+    branches: [ '**' ] # Triggers on any branch pushed
+  workflow_dispatch: # Allows manual one-click trigger from GitHub Actions tab
 
 permissions:
   contents: write
+  packages: write
 
 jobs:
   build-and-release:
-    name: Build & Release Android Debug APK
+    name: Build & Publish APK to Releases
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -28,62 +29,76 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Prepare Keystore & Environment Files
+      - name: Prepare Keystore & Environment
         run: |
-          # Create .env if missing to satisfy secrets-gradle-plugin
+          # Create .env to satisfy secrets gradle plugin
           touch .env
           
-          # Decode debug.keystore from base64 if present
+          # Setup debug keystore
           if [ -f "debug.keystore.base64" ]; then
             echo "Decoding debug.keystore from base64..."
             base64 -d debug.keystore.base64 > debug.keystore
           else
-            echo "Generating fallback debug.keystore..."
+            echo "Generating fresh debug.keystore..."
             keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
           fi
           
-          # Ensure gradlew has executable permissions
+          # Make gradlew executable
           chmod +x gradlew
 
-      - name: Build Debug APK with Gradle
+      - name: Build Debug APK
         run: ./gradlew assembleDebug --no-daemon
 
-      - name: Verify & Prepare Release Assets
+      - name: Prepare Release Assets
         run: |
           mkdir -p release-assets
           cp app/build/outputs/apk/debug/app-debug.apk release-assets/UV-Privacy-v1.0-debug.apk
           ls -lh release-assets/
 
-      - name: Upload Debug APK Artifact (Actions Tab)
+      - name: Upload Artifact (Backup in Actions Tab)
         uses: actions/upload-artifact@v4
         with:
           name: UV-Privacy-Debug-APK
           path: release-assets/UV-Privacy-v1.0-debug.apk
           retention-days: 30
 
-      - name: Publish to GitHub Releases (Releases Section)
-        if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v1.0.0-debug
-          name: "UV PRIVACY v1.0 (Debug APK)"
-          body: |
-            ## 🛡️ UV PRIVACY — Advanced Stealth Vault & Utility Suite
-            **Created by:** Darya Khan abro (team Mr Pro PrimeX)
-
-            ### 📲 Direct APK Download (No Unzipping Needed):
-            Click on **`UV-Privacy-v1.0-debug.apk`** below in the **Assets** section to download the standalone APK directly to your Android device.
-
-            ### ✨ Key Features:
-            - **Stealth Cloaking:** Disguised as a functional Clock and Flashlight utility.
-            - **Encrypted Media Vault:** Authenticated AES-256-GCM hardware-accelerated encryption.
-            - **Native Video Player:** Streaming file-descriptor playback with 10s skip, scrubber, and time elapsed counter.
-            - **Post-Import Gallery Cleaner:** Safely prompts to delete unencrypted original files from Gallery / Device storage.
-            - **Flashlight Secret Entry:** Drag & release brightness slider at 77% or long-press power button to trigger secret vault PIN.
-            - **Display Sounds & Haptics:** Audio tone and vibration feedback for keypad, flashlight, lock/unlock, and error states.
-            - **Animated Splash Screen:** Custom logo and creator attribution branding on launch.
-          draft: false
-          prerelease: false
-          files: release-assets/UV-Privacy-v1.0-debug.apk
+      - name: Publish Direct to GitHub Releases
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG_NAME="v1.0-debug"
+          RELEASE_TITLE="UV PRIVACY v1.0 (Debug APK)"
+          
+          # Verify file exists
+          if [ ! -f "release-assets/UV-Privacy-v1.0-debug.apk" ]; then
+            echo "Error: APK not found!"
+            exit 1
+          fi
+
+          echo "Publishing to GitHub Releases using GitHub CLI..."
+          
+          # If release exists, upload/clobber asset; otherwise create fresh release
+          if gh release view "$TAG_NAME" > /dev/null 2>&1; then
+            echo "Release $TAG_NAME exists. Uploading new APK asset..."
+            gh release upload "$TAG_NAME" release-assets/UV-Privacy-v1.0-debug.apk --clobber
+          else
+            echo "Creating new release $TAG_NAME..."
+            gh release create "$TAG_NAME" release-assets/UV-Privacy-v1.0-debug.apk \
+              --title "$RELEASE_TITLE" \
+              --notes "## 🛡️ UV PRIVACY — Advanced Stealth Vault & Utility Suite
+          **Created by:** Darya Khan abro (team Mr Pro PrimeX)
+
+          ### 📲 Direct APK Download (No Unzipping Needed):
+          Click on **\`UV-Privacy-v1.0-debug.apk\`** below in the **Assets** section to download directly to your Android device.
+
+          ### ✨ Key Features:
+          - **Stealth Disguise:** Real Digital Clock & Flashlight utility suites.
+          - **Encrypted Media Vault:** AES-256-GCM private vault with native video player.
+          - **Gallery Auto-Cleaner:** Prompt to delete unencrypted original files from device.
+          - **Flashlight Secret Entry:** Drag brightness slider to 77% to trigger secret vault.
+          - **Display Sounds & Haptics:** Audio tones for keypad, flashlight, and lock/unlock." \
+              --latest
+          fi
+
+          echo "Release published successfully!"
